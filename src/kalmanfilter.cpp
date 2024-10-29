@@ -9,14 +9,24 @@
 #include "kalmanfilter.h"
 #include "utils.h"
 
+#include <cmath>
+
 // -------------------------------------------------- //
 // YOU CAN USE AND MODIFY THESE CONSTANTS HERE
 constexpr bool INIT_ON_FIRST_PREDICTION = true;
-constexpr double INIT_POS_STD = 0;
-constexpr double INIT_VEL_STD = 15;
+constexpr double INIT_POS_STD = 0.0;
+constexpr double INIT_VEL_STD = 0.0;
 constexpr double ACCEL_STD = 0.1;
 constexpr double GPS_POS_STD = 3.0;
 // -------------------------------------------------- //
+
+namespace {
+    constexpr double PI  = 3.141592653589793238463;
+
+    constexpr double degToRad(double deg) {
+        return deg * PI / 180.0;
+    }
+}
 
 void KalmanFilter::predictionStep(double dt)
 {
@@ -31,11 +41,29 @@ void KalmanFilter::predictionStep(double dt)
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
             VectorXd state = Vector4d::Zero();
-            MatrixXd cov = Matrix4d::Zero();
-
+            auto angle = degToRad(45.0);
+            state[0] = 0.0;
+            state[1] = 0.0;
+            state[2] = 5.0 *std::cos(angle);
+            state[3] = 5.0 *std::sin(angle);
+            
             // Assume the initial position is (X,Y) = (0,0) m
             // Assume the initial velocity is 5 m/s at 45 degrees (VX,VY) = (5*cos(45deg),5*sin(45deg)) m/s
-            state << 0, 0, 5.0*cos(M_PI/4), 5.0*sin(M_PI/4);
+            
+            MatrixXd cov = Matrix4d::Zero();
+            constexpr double SDpx = INIT_POS_STD;
+            constexpr double SDpy = INIT_POS_STD;
+            constexpr double SDvx = INIT_VEL_STD;
+            constexpr double SDvy = INIT_VEL_STD;
+
+            std::vector<double> covRow {SDpx, SDpy, SDvx, SDvy};
+            std::vector<double> covCol {SDpx, SDpy, SDvx, SDvy};
+            for (size_t r = 0; r < covRow.size(); r++) {
+                cov(r, r) = covRow[r] * covRow[r];
+                // for (size_t c = 0; c < covCol.size(); c++) {
+                    // cov(r, c) = covRow[r] * covCol[c];
+                // }
+            }
 
             setState(state);
             setCovariance(cov);
@@ -53,6 +81,34 @@ void KalmanFilter::predictionStep(double dt)
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
 
+        MatrixXd F = Matrix4d::Zero();
+        for (size_t i = 0; i < 4; i++) {
+            F(i, i) = 1;
+        }
+        F(0, 2) = dt;
+        F(1, 3) = dt;
+
+        state = F * state;
+
+        constexpr double AccelSdX = ACCEL_STD;
+        constexpr double AccelSdY = ACCEL_STD;
+        MatrixXd Q = Matrix2d::Zero();
+        Q(0, 0) = AccelSdX * AccelSdX;
+        Q(1, 1) = AccelSdY * AccelSdY;
+
+        
+        MatrixXd L(4, 2);
+        for (int r = 0; r < 4; r++) {
+            for (int c = 0; c < 2; c++) {
+                L(r, c) = 0.0;
+            }
+        }
+        L(0, 0) = 0.5 * dt*dt;
+        L(1, 1) = 0.5 * dt*dt;
+        L(2, 0) = dt;
+        L(3, 1) = dt;
+
+        cov = F * cov * F.transpose() + L * Q * L.transpose();
 
         // ----------------------------------------------------------------------- //
 
