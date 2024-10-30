@@ -9,14 +9,15 @@
 #include "kalmanfilter.h"
 #include "utils.h"
 
+#include <iostream>
 #include <cmath>
 
 // -------------------------------------------------- //
 // YOU CAN USE AND MODIFY THESE CONSTANTS HERE
 constexpr bool INIT_ON_FIRST_PREDICTION = true;
-constexpr double INIT_POS_STD = 0.0;
-constexpr double INIT_VEL_STD = 0.0;
-constexpr double ACCEL_STD = 0.0;
+constexpr double INIT_POS_STD = 101.0;
+constexpr double INIT_VEL_STD = 9.0;
+constexpr double ACCEL_STD = 1.5;
 constexpr double GPS_POS_STD = 3.0;
 // -------------------------------------------------- //
 
@@ -41,11 +42,11 @@ void KalmanFilter::predictionStep(double dt)
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
             VectorXd state = Vector4d::Zero();
-            auto angle = degToRad(45.0);
-            state[0] = 0.0;
-            state[1] = 0.0;
-            state[2] = 5.0 *std::cos(angle);
-            state[3] = 5.0 *std::sin(angle);
+            // auto angle = degToRad(45.0);
+            // state[0] = 0.0;
+            // state[1] = 0.0;
+            // state[2] = 5.0 *std::cos(angle);
+            // state[3] = 5.0 *std::sin(angle);
             
             // Assume the initial position is (X,Y) = (0,0) m
             // Assume the initial velocity is 5 m/s at 45 degrees (VX,VY) = (5*cos(45deg),5*sin(45deg)) m/s
@@ -131,6 +132,44 @@ void KalmanFilter::handleGPSMeasurement(GPSMeasurement meas)
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE 
 
+        MatrixXd H(2, 4);
+        for (int r = 0; r < 2; r++) {
+            for (int c = 0; c < 4; c++) {
+                H(r, c) = 0.0;
+            }
+        }
+        H(0, 0) = 1.0;
+        H(1, 1) = 1.0;
+        // std::cout << "H: " << H.rows() << " " << H.cols() << "\n";
+
+        MatrixXd R = Matrix2d::Zero();
+        R(0, 0) = GPS_POS_STD * GPS_POS_STD;
+        R(1, 1) = GPS_POS_STD * GPS_POS_STD;
+        // std::cout << "R: " << R.rows() << " " << R.cols() << "\n";
+
+        // 1. S = H * P^- * H^T + M*R*M^T, assume R already have shape
+        MatrixXd S = H * cov * H.transpose() + R;
+        // std::cout << "S: " << S.rows() << " " << S.cols() << "\n";
+
+        // 2. K = H * P^- * S^inv
+        MatrixXd K = cov * H.transpose() * S.inverse();
+        // std::cout << "K: " << K.rows() << " " << K.cols() << "\n";
+
+        VectorXd y = Vector4d::Zero();
+        y(0) = meas.x;
+        y(1) = meas.y;
+        // std::cout << "y: " << y.rows() << " " << y.cols() << "\n";
+
+        // 3. k^+ = k^- + K(y^hat - H*x^-)
+        MatrixXd yHat = H*y; // v sensor noize
+        state = state + K * (yHat - H * state);
+
+        // 4. P^+ = (I-KH)P^-
+        MatrixXd I = MatrixXd::Identity(4,4);
+        for (int i = 0; i < 4; i++) {
+            I(i, i) = 1.0;
+        }
+        cov = (I - K*H)*cov;
 
         // ----------------------------------------------------------------------- //
 
@@ -147,8 +186,14 @@ void KalmanFilter::handleGPSMeasurement(GPSMeasurement meas)
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
             VectorXd state = Vector4d::Zero();
-            MatrixXd cov = Matrix4d::Zero();
+            state(0) = meas.x;
+            state(1) = meas.y;
 
+            MatrixXd cov = Matrix4d::Zero();
+            cov(0, 0) = GPS_POS_STD * GPS_POS_STD;
+            cov(1, 1) = GPS_POS_STD * GPS_POS_STD;
+            cov(2, 2) = INIT_VEL_STD * INIT_VEL_STD;
+            cov(3, 3) = INIT_VEL_STD * INIT_VEL_STD;
 
             setState(state);
             setCovariance(cov);
