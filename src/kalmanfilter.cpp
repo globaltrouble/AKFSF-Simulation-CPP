@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------------------- //
-// Advanced Kalman Filtering and Sensor Fusion Course - Linear Kalman Filter
+// Advanced Kalman Filtering and Sensor Fusion Course - Extended Kalman Filter
 //
 // ####### STUDENT FILE #######
 //
@@ -9,68 +9,56 @@
 #include "kalmanfilter.h"
 #include "utils.h"
 
-#include <iostream>
 #include <cmath>
-
 // -------------------------------------------------- //
 // YOU CAN USE AND MODIFY THESE CONSTANTS HERE
-constexpr bool INIT_ON_FIRST_PREDICTION = true;
-constexpr double INIT_POS_STD = 101.0;
-constexpr double INIT_VEL_STD = 9.0;
-constexpr double ACCEL_STD = 1.5;
+constexpr double ACCEL_STD = 1.0;
+constexpr double GYRO_STD = 0.01/180.0 * M_PI;
+constexpr double INIT_VEL_STD = 10.0;
+constexpr double INIT_PSI_STD = 45.0/180.0 * M_PI;
 constexpr double GPS_POS_STD = 3.0;
+constexpr double LIDAR_RANGE_STD = 3.0;
+constexpr double LIDAR_THETA_STD = 0.02;
 // -------------------------------------------------- //
 
-namespace {
-    constexpr double PI  = 3.141592653589793238463;
+void KalmanFilter::handleLidarMeasurements(const std::vector<LidarMeasurement>& dataset, const BeaconMap& map)
+{
+    // Assume No Correlation between the Measurements and Update Sequentially
+    for(const auto& meas : dataset) {handleLidarMeasurement(meas, map);}
+}
 
-    constexpr double degToRad(double deg) {
-        return deg * PI / 180.0;
+void KalmanFilter::handleLidarMeasurement(LidarMeasurement meas, const BeaconMap& map)
+{
+    if (isInitialised())
+    {
+        VectorXd state = getState();
+        MatrixXd cov = getCovariance();
+
+        // Implement The Kalman Filter Update Step for the Lidar Measurements in the 
+        // section below.
+        // HINT: use the wrapAngle() function on angular values to always keep angle
+        // values within correct range, otherwise strange angle effects might be seen.
+        // HINT: You can use the constants: LIDAR_RANGE_STD, LIDAR_THETA_STD
+        // HINT: The mapped-matched beacon position can be accessed by the variables
+        // map_beacon.x and map_beacon.y
+        // ----------------------------------------------------------------------- //
+        // ENTER YOUR CODE HERE
+
+        BeaconData map_beacon = map.getBeaconWithId(meas.id); // Match Beacon with built in Data Association Id
+        if (meas.id != -1 && map_beacon.id != -1)
+        {           
+            // The map matched beacon positions can be accessed using: map_beacon.x AND map_beacon.y
+        }
+
+        // ----------------------------------------------------------------------- //
+
+        setState(state);
+        setCovariance(cov);
     }
 }
 
-void KalmanFilter::predictionStep(double dt)
+void KalmanFilter::predictionStep(GyroMeasurement gyro, double dt)
 {
-    if (!isInitialised() && INIT_ON_FIRST_PREDICTION)
-    {
-        // Implement the State Vector and Covariance Matrix Initialisation in the
-        // section below if you want to initialise the filter WITHOUT waiting for
-        // the first measurement to occur. Make sure you call the setState() /
-        // setCovariance() functions once you have generated the initial conditions.
-        // Hint: Assume the state vector has the form [X,Y,VX,VY].
-        // Hint: You can use the constants: INIT_POS_STD, INIT_VEL_STD
-        // ----------------------------------------------------------------------- //
-        // ENTER YOUR CODE HERE
-            VectorXd state = Vector4d::Zero();
-            // auto angle = degToRad(45.0);
-            // state[0] = 0.0;
-            // state[1] = 0.0;
-            // state[2] = 5.0 *std::cos(angle);
-            // state[3] = 5.0 *std::sin(angle);
-            
-            // Assume the initial position is (X,Y) = (0,0) m
-            // Assume the initial velocity is 5 m/s at 45 degrees (VX,VY) = (5*cos(45deg),5*sin(45deg)) m/s
-            
-            MatrixXd cov = Matrix4d::Zero();
-            constexpr double SDpx = INIT_POS_STD;
-            constexpr double SDpy = INIT_POS_STD;
-            constexpr double SDvx = INIT_VEL_STD;
-            constexpr double SDvy = INIT_VEL_STD;
-
-            std::vector<double> covRow {SDpx, SDpy, SDvx, SDvy};
-            std::vector<double> covCol {SDpx, SDpy, SDvx, SDvy};
-            for (size_t r = 0; r < covRow.size(); r++) {
-                cov(r, r) = covRow[r] * covRow[r];
-                // for (size_t c = 0; c < covCol.size(); c++) {
-                    // cov(r, c) = covRow[r] * covCol[c];
-                // }
-            }
-
-            setState(state);
-            setCovariance(cov);
-        // ----------------------------------------------------------------------- //
-    }
-
     if (isInitialised())
     {
         VectorXd state = getState();
@@ -78,127 +66,95 @@ void KalmanFilter::predictionStep(double dt)
 
         // Implement The Kalman Filter Prediction Step for the system in the  
         // section below.
-        // Hint: You can use the constants: ACCEL_STD
+        // HINT: Assume the state vector has the form [PX, PY, PSI, V].
+        // HINT: Use the Gyroscope measurement as an input into the prediction step.
+        // HINT: You can use the constants: ACCEL_STD, GYRO_STD
+        // HINT: use the wrapAngle() function on angular values to always keep angle
+        // values within correct range, otherwise strange angle effects might be seen.
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
+        double psiPrimeC = gyro.psi_dot;
+        double ac = 0.0;
+        double xp = state(0);
+        double yp = state(1);
+        double psiP = state(2);
+        double vp = state(3);
+        VectorXd F = VectorXd(4);
+        F(0) = vp*cos(psiP);
+        F(1) = vp*sin(psiP);
+        F(2) = psiPrimeC;
+        F(3) = ac;
 
-        MatrixXd F = Matrix4d::Zero();
-        for (size_t i = 0; i < 4; i++) {
-            F(i, i) = 1;
+        state = state + (dt * F);
+        state(2) = wrapAngle(state(2));
+
+        MatrixXd dF_dx = Matrix4d::Zero();
+        for (int i = 0; i < 4; i++) {
+            dF_dx(i, i) = 1.0;
         }
-        F(0, 2) = dt;
-        F(1, 3) = dt;
+        dF_dx(0, 2) = -dt*vp*sin(psiP);
+        dF_dx(0, 3) = dt*cos(psiP);
+        dF_dx(1, 2) = dt*cos(psiP);
+        dF_dx(1, 3) = dt * sin(psiP);
 
-        state = F * state;
+        MatrixXd Q = Matrix4d::Zero();
+        Q(2, 2) = dt*dt*GYRO_STD*GYRO_STD;
+        Q(3, 3) = dt*dt*ACCEL_STD*ACCEL_STD;
 
-        constexpr double AccelSdX = ACCEL_STD;
-        constexpr double AccelSdY = ACCEL_STD;
-        MatrixXd Q = Matrix2d::Zero();
-        Q(0, 0) = AccelSdX * AccelSdX;
-        Q(1, 1) = AccelSdY * AccelSdY;
-
-        
-        MatrixXd L(4, 2);
-        for (int r = 0; r < 4; r++) {
-            for (int c = 0; c < 2; c++) {
-                L(r, c) = 0.0;
-            }
-        }
-        L(0, 0) = 0.5 * dt*dt;
-        L(1, 1) = 0.5 * dt*dt;
-        L(2, 0) = dt;
-        L(3, 1) = dt;
-
-        cov = F * cov * F.transpose() + L * Q * L.transpose();
+        cov = dF_dx * cov * dF_dx.transpose() + Q;
 
         // ----------------------------------------------------------------------- //
 
         setState(state);
         setCovariance(cov);
-    }
+    } 
 }
 
 void KalmanFilter::handleGPSMeasurement(GPSMeasurement meas)
 {
+    // All this code is the same as the LKF as the measurement model is linear
+    // so the EKF update state would just produce the same result.
     if(isInitialised())
     {
         VectorXd state = getState();
         MatrixXd cov = getCovariance();
 
-        // Implement The Kalman Filter Update Step for the GPS Measurements in the 
-        // section below.
-        // Hint: Assume that the GPS sensor has a 3m (1 sigma) position uncertainty.
-        // Hint: You can use the constants: GPS_POS_STD
-        // ----------------------------------------------------------------------- //
-        // ENTER YOUR CODE HERE 
-
-        MatrixXd H(2, 4);
-        for (int r = 0; r < 2; r++) {
-            for (int c = 0; c < 4; c++) {
-                H(r, c) = 0.0;
-            }
-        }
-        H(0, 0) = 1.0;
-        H(1, 1) = 1.0;
-        // std::cout << "H: " << H.rows() << " " << H.cols() << "\n";
-
+        VectorXd z = Vector2d::Zero();
+        MatrixXd H = MatrixXd(2,4);
         MatrixXd R = Matrix2d::Zero();
-        R(0, 0) = GPS_POS_STD * GPS_POS_STD;
-        R(1, 1) = GPS_POS_STD * GPS_POS_STD;
-        // std::cout << "R: " << R.rows() << " " << R.cols() << "\n";
 
-        // 1. S = H * P^- * H^T + M*R*M^T, assume R already have shape
+        z << meas.x,meas.y;
+        H << 1,0,0,0,0,1,0,0;
+        R(0,0) = GPS_POS_STD*GPS_POS_STD;
+        R(1,1) = GPS_POS_STD*GPS_POS_STD;
+
+        VectorXd z_hat = H * state;
+        VectorXd y = z - z_hat;
         MatrixXd S = H * cov * H.transpose() + R;
-        // std::cout << "S: " << S.rows() << " " << S.cols() << "\n";
+        MatrixXd K = cov*H.transpose()*S.inverse();
 
-        // 2. K = H * P^- * S^inv
-        MatrixXd K = cov * H.transpose() * S.inverse();
-        // std::cout << "K: " << K.rows() << " " << K.cols() << "\n";
-
-        VectorXd y = Vector4d::Zero();
-        y(0) = meas.x;
-        y(1) = meas.y;
-        // std::cout << "y: " << y.rows() << " " << y.cols() << "\n";
-
-        // 3. k^+ = k^- + K(y^hat - H*x^-)
-        MatrixXd yHat = H*y; // v sensor noize
-        state = state + K * (yHat - H * state);
-
-        // 4. P^+ = (I-KH)P^-
-        MatrixXd I = MatrixXd::Identity(4,4);
-        for (int i = 0; i < 4; i++) {
-            I(i, i) = 1.0;
-        }
-        cov = (I - K*H)*cov;
-
-        // ----------------------------------------------------------------------- //
+        state = state + K*y;
+        cov = (Matrix4d::Identity() - K*H) * cov;
 
         setState(state);
         setCovariance(cov);
     }
     else
     {
-        // Implement the State Vector and Covariance Matrix Initialisation in the
-        // section below. Make sure you call the setState/setCovariance functions
-        // once you have generated the initial conditions.
-        // Hint: Assume the state vector has the form [X,Y,VX,VY].
-        // Hint: You can use the constants: GPS_POS_STD, INIT_VEL_STD
-        // ----------------------------------------------------------------------- //
-        // ENTER YOUR CODE HERE
-            VectorXd state = Vector4d::Zero();
-            state(0) = meas.x;
-            state(1) = meas.y;
+        VectorXd state = Vector4d::Zero();
+        MatrixXd cov = Matrix4d::Zero();
 
-            MatrixXd cov = Matrix4d::Zero();
-            cov(0, 0) = GPS_POS_STD * GPS_POS_STD;
-            cov(1, 1) = GPS_POS_STD * GPS_POS_STD;
-            cov(2, 2) = INIT_VEL_STD * INIT_VEL_STD;
-            cov(3, 3) = INIT_VEL_STD * INIT_VEL_STD;
+        state(0) = meas.x;
+        state(1) = meas.y;
+        cov(0,0) = GPS_POS_STD*GPS_POS_STD;
+        cov(1,1) = GPS_POS_STD*GPS_POS_STD;
+        cov(2,2) = INIT_PSI_STD*INIT_PSI_STD;
+        cov(3,3) = INIT_VEL_STD*INIT_VEL_STD;
 
-            setState(state);
-            setCovariance(cov);
-        // ----------------------------------------------------------------------- //
-    }        
+        setState(state);
+        setCovariance(cov);
+    } 
+             
 }
 
 Matrix2d KalmanFilter::getVehicleStatePositionCovariance()
@@ -213,15 +169,10 @@ VehicleState KalmanFilter::getVehicleState()
 {
     if (isInitialised())
     {
-        VectorXd state = getState(); // STATE VECTOR [X,Y,VX,VY]
-        double psi = std::atan2(state[3],state[2]);
-        double V = std::sqrt(state[2]*state[2] + state[3]*state[3]);
-        return VehicleState(state[0],state[1],psi,V);
+        VectorXd state = getState(); // STATE VECTOR [X,Y,PSI,V,...]
+        return VehicleState(state[0],state[1],state[2],state[3]);
     }
     return VehicleState();
 }
 
-void KalmanFilter::predictionStep(GyroMeasurement gyro, double dt){predictionStep(dt);}
-void KalmanFilter::handleLidarMeasurements(const std::vector<LidarMeasurement>& dataset, const BeaconMap& map){}
-void KalmanFilter::handleLidarMeasurement(LidarMeasurement meas, const BeaconMap& map){}
-
+void KalmanFilter::predictionStep(double dt){}
