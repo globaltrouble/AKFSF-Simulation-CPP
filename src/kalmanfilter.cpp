@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------------------- //
-// Advanced Kalman Filtering and Sensor Fusion Course - Extended Kalman Filter
+// Advanced Kalman Filtering and Sensor Fusion Course - Unscented Kalman Filter
 //
 // ####### STUDENT FILE #######
 //
@@ -9,23 +9,94 @@
 #include "kalmanfilter.h"
 #include "utils.h"
 
-#include <cmath>
 // -------------------------------------------------- //
 // YOU CAN USE AND MODIFY THESE CONSTANTS HERE
-constexpr double ACCEL_STD = 1.0;
+constexpr double ACCEL_STD = 0.05;
 constexpr double GYRO_STD = 0.01/180.0 * M_PI;
-constexpr double INIT_VEL_STD = 10.0;
-constexpr double INIT_PSI_STD = 45.0/180.0 * M_PI;
+constexpr double INIT_VEL_STD = 2;
+constexpr double INIT_PSI_STD = 5.0/180.0 * M_PI;
 constexpr double GPS_POS_STD = 3.0;
 constexpr double LIDAR_RANGE_STD = 3.0;
 constexpr double LIDAR_THETA_STD = 0.02;
 // -------------------------------------------------- //
 
-void KalmanFilter::handleLidarMeasurements(const std::vector<LidarMeasurement>& dataset, const BeaconMap& map)
+// ----------------------------------------------------------------------- //
+// USEFUL HELPER FUNCTIONS
+VectorXd normaliseState(VectorXd state)
 {
-    // Assume No Correlation between the Measurements and Update Sequentially
-    for(const auto& meas : dataset) {handleLidarMeasurement(meas, map);}
+    state(2) = wrapAngle(state(2));
+    return state;
 }
+VectorXd normaliseLidarMeasurement(VectorXd meas)
+{
+    meas(1) = wrapAngle(meas(1));
+    return meas;
+}
+std::vector<VectorXd> generateSigmaPoints(VectorXd state, MatrixXd cov)
+{
+    std::vector<VectorXd> sigmaPoints {state};
+
+    int n = state.size();
+    sigmaPoints.reserve(n*2+1);
+
+    int k = 3 - n;
+    auto lmbda = sqrt(n+k);
+    MatrixXd sP = cov.llt().matrixL();
+
+    for (int i = 0; i < n; i++) {
+        sigmaPoints.emplace_back(state + lmbda * sP.col(i));
+        sigmaPoints.emplace_back(state - lmbda * sP.col(i));
+    }
+
+    return sigmaPoints;
+}
+
+std::vector<double> generateSigmaWeights(unsigned int n)
+{
+    double k = 3.0 - n;
+    auto div = n+k;
+    std::vector<double> weights { {k/div} };
+    for (unsigned i = 0; i < 2*n; i++) {
+        weights.emplace_back(0.5/div);
+    } 
+
+    return weights;
+}
+
+VectorXd lidarMeasurementModel(VectorXd aug_state, double beaconX, double beaconY)
+{
+    VectorXd z_hat = VectorXd::Zero(2);
+
+    // ----------------------------------------------------------------------- //
+    // ENTER YOUR CODE HERE
+
+    // ----------------------------------------------------------------------- //
+
+    return z_hat;
+}
+
+VectorXd vehicleProcessModel(VectorXd aug_state, double psi_dot, double dt)
+{
+    VectorXd new_state = VectorXd::Zero(4);
+    double x = aug_state(0);
+    double y = aug_state(1);
+    double psi = aug_state(2);
+    double v = aug_state(3);
+    double psi_nosie = aug_state(4);
+    double accel_noise = aug_state(5);
+
+    new_state(0) = x + dt * v*cos(psi);
+    new_state(1) = y + dt * v*sin(psi);
+    new_state(2) = psi + dt * (psi_dot + psi_nosie);
+    new_state(3) = v + dt * accel_noise;
+    // ----------------------------------------------------------------------- //
+    // ENTER YOUR CODE HERE
+
+    // ----------------------------------------------------------------------- //
+
+    return new_state;
+}
+// ----------------------------------------------------------------------- //
 
 void KalmanFilter::handleLidarMeasurement(LidarMeasurement meas, const BeaconMap& map)
 {
@@ -36,60 +107,22 @@ void KalmanFilter::handleLidarMeasurement(LidarMeasurement meas, const BeaconMap
 
         // Implement The Kalman Filter Update Step for the Lidar Measurements in the 
         // section below.
-        // HINT: use the wrapAngle() function on angular values to always keep angle
-        // values within correct range, otherwise strange angle effects might be seen.
+        // HINT: Use the normaliseState() and normaliseLidarMeasurement() functions
+        // to always keep angle values within correct range.
+        // HINT: Do not normalise during sigma point calculation!
         // HINT: You can use the constants: LIDAR_RANGE_STD, LIDAR_THETA_STD
         // HINT: The mapped-matched beacon position can be accessed by the variables
         // map_beacon.x and map_beacon.y
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
+
         BeaconData map_beacon = map.getBeaconWithId(meas.id); // Match Beacon with built in Data Association Id
-        if (meas.id != -1 && map_beacon.id != -1) 
+        if (meas.id != -1 && map_beacon.id != -1) // Check that we have a valid beacon match
         {
-            // The map matched beacon positions can be accessed using: map_beacon.x AND map_beacon.y
-            // ----------------------------------------------------------------------- //
-            /*
-            S = DH/dx * Pk- * (DH/dx).T + R
-            */
-            double Lx = map_beacon.x;
-            double Ly = map_beacon.y;
-            double Px = state(0);
-            double Py = state(1);
-            double Phi = state(2);
+           
 
-            double dx = Lx - Px;
-            double dy = Ly - Py;
-
-            VectorXd Z = Vector2d::Zero();
-            Z(0) = meas.range;
-            Z(1) = meas.theta;
-
-            double d = sqrtf64(dx*dx + dy*dy);
-
-            VectorXd Z_hat = Vector2d::Zero();
-            Z_hat(0) = d;
-            Z_hat(1) = wrapAngle(atan2f64(dy, dx) - Phi);
-
-            VectorXd V = Z - Z_hat;
-            V(1) = wrapAngle(V(1));
-
-            MatrixXd H = MatrixXd(2, 4);
-            H << (-dx/d), (-dy/d), 0.0, 0.0,
-                (dy/(d*d)), (-dx/(d*d)), -1.0, 0.0;
-
-            MatrixXd R = Matrix2d::Zero();
-            R(0, 0) = LIDAR_RANGE_STD*LIDAR_RANGE_STD;
-            R(1, 1) = LIDAR_THETA_STD * LIDAR_THETA_STD;
-            MatrixXd S = Matrix2d::Zero();
-            S = H * cov * H.transpose() + R;
-
-            MatrixXd K = cov * H.transpose() * S.inverse();
-
-            state = state + K * V;
-            
-            MatrixXd I = MatrixXd::Identity(4,4);
-            cov = (I - K*H)*cov;
         }
+        // ----------------------------------------------------------------------- //
 
         setState(state);
         setCovariance(cov);
@@ -103,56 +136,68 @@ void KalmanFilter::predictionStep(GyroMeasurement gyro, double dt)
         VectorXd state = getState();
         MatrixXd cov = getCovariance();
 
+        int n = state.size();
+        int an = n+2;
+        VectorXd aState = VectorXd::Zero(an);
+        for (int i = 0; i < n; i++) {
+            aState(i) = state(i);
+        }
+
+        // TODO: try to comment.
+        // aState(4) = GYRO_STD;
+        // aState(5) = ACCEL_STD;
+
+        MatrixXd aCov = MatrixXd::Zero(an,an);
+        for (int r = 0; r < n; r++) {
+            for (int c = 0; c < n; c++) {
+                aCov(r, c) = cov(r, c);
+            }
+        }
+        aCov(n, n) = GYRO_STD*GYRO_STD;
+        aCov(n+1, n+1) = ACCEL_STD*ACCEL_STD;
+
+        auto sigmas = generateSigmaPoints(aState, aCov);
+        auto weights = generateSigmaWeights(an);
+
+        std::vector<VectorXd> pred;
+        for (VectorXd paug : sigmas) {
+            pred.emplace_back(vehicleProcessModel(paug, gyro.psi_dot, dt));
+        }
+
+        VectorXd resState = VectorXd::Zero(4);
+        for (int i = 0; i < pred.size(); i++) {
+            resState += weights[i] * pred[i];
+        }
+        resState = normaliseState(resState);
+
+        MatrixXd resCov = MatrixXd::Zero(4,4);
+        for (int i = 0; i < pred.size(); i++) {
+            VectorXd diff = normaliseState(resState-pred[i]);
+            resCov += weights[i] * diff * diff.transpose();
+        }
+        
         // Implement The Kalman Filter Prediction Step for the system in the  
         // section below.
         // HINT: Assume the state vector has the form [PX, PY, PSI, V].
         // HINT: Use the Gyroscope measurement as an input into the prediction step.
         // HINT: You can use the constants: ACCEL_STD, GYRO_STD
-        // HINT: use the wrapAngle() function on angular values to always keep angle
-        // values within correct range, otherwise strange angle effects might be seen.
+        // HINT: Use the normaliseState() function to always keep angle values within correct range.
+        // HINT: Do NOT normalise during sigma point calculation!
         // ----------------------------------------------------------------------- //
         // ENTER YOUR CODE HERE
-        double psiPrimeC = gyro.psi_dot;
-        double ac = 0.0;
-        double xp = state(0);
-        double yp = state(1);
-        double psiP = state(2);
-        double vp = state(3);
-        VectorXd F = VectorXd(4);
-        F(0) = vp*cos(psiP);
-        F(1) = vp*sin(psiP);
-        F(2) = psiPrimeC;
-        F(3) = ac;
 
-        state = state + (dt * F);
-        state(2) = wrapAngle(state(2));
-
-        MatrixXd dF_dx = Matrix4d::Zero();
-        for (int i = 0; i < 4; i++) {
-            dF_dx(i, i) = 1.0;
-        }
-        dF_dx(0, 2) = -dt*vp*sin(psiP);
-        dF_dx(0, 3) = dt*cos(psiP);
-        dF_dx(1, 2) = dt*cos(psiP);
-        dF_dx(1, 3) = dt * sin(psiP);
-
-        MatrixXd Q = Matrix4d::Zero();
-        Q(2, 2) = dt*dt*GYRO_STD*GYRO_STD;
-        Q(3, 3) = dt*dt*ACCEL_STD*ACCEL_STD;
-
-        cov = dF_dx * cov * dF_dx.transpose() + Q;
 
         // ----------------------------------------------------------------------- //
 
-        setState(state);
-        setCovariance(cov);
+        setState(resState);
+        setCovariance(resCov);
     } 
 }
 
 void KalmanFilter::handleGPSMeasurement(GPSMeasurement meas)
 {
     // All this code is the same as the LKF as the measurement model is linear
-    // so the EKF update state would just produce the same result.
+    // so the UKF update state would just produce the same result.
     if(isInitialised())
     {
         VectorXd state = getState();
@@ -173,13 +218,18 @@ void KalmanFilter::handleGPSMeasurement(GPSMeasurement meas)
         MatrixXd K = cov*H.transpose()*S.inverse();
 
         state = state + K*y;
-        cov = (Matrix4d::Identity() - K*H) * cov;
+        cov = (MatrixXd::Identity(4,4) - K*H) * cov;
 
         setState(state);
         setCovariance(cov);
     }
     else
     {
+        // You may modify this initialisation routine if you can think of a more
+        // robust and accuracy way of initialising the filter.
+        // ----------------------------------------------------------------------- //
+        // YOU ARE FREE TO MODIFY THE FOLLOWING CODE HERE
+
         VectorXd state = Vector4d::Zero();
         MatrixXd cov = Matrix4d::Zero();
 
@@ -192,8 +242,15 @@ void KalmanFilter::handleGPSMeasurement(GPSMeasurement meas)
 
         setState(state);
         setCovariance(cov);
-    } 
-             
+
+        // ----------------------------------------------------------------------- //
+    }             
+}
+
+void KalmanFilter::handleLidarMeasurements(const std::vector<LidarMeasurement>& dataset, const BeaconMap& map)
+{
+    // Assume No Correlation between the Measurements and Update Sequentially
+    for(const auto& meas : dataset) {handleLidarMeasurement(meas, map);}
 }
 
 Matrix2d KalmanFilter::getVehicleStatePositionCovariance()
