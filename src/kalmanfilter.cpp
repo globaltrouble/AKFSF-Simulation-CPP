@@ -63,14 +63,37 @@ std::vector<double> generateSigmaWeights(unsigned int n)
     return weights;
 }
 
+VectorXd lidarMeasurementModelSimle(VectorXd state, double beaconX, double beaconY) {
+    VectorXd zhat = VectorXd::Zero(2);
+    double px = state[0];
+    double py = state[1];
+    double pPhi = state[2];
+    double pV = state[3];
+
+    double dx = px-beaconX;
+    double dy = py-beaconY;
+
+    zhat(0) = sqrt(dx*dx + dy*dy);
+    zhat(1) = atan2(dy, dx) - pPhi;
+
+    return zhat;
+}
+
 VectorXd lidarMeasurementModel(VectorXd aug_state, double beaconX, double beaconY)
 {
     VectorXd z_hat = VectorXd::Zero(2);
 
-    // ----------------------------------------------------------------------- //
-    // ENTER YOUR CODE HERE
+    double px = aug_state[0];
+    double py = aug_state[1];
+    double pPhi = aug_state[2];
+    double vR = aug_state[4];
+    double vPhi = aug_state[5];
 
-    // ----------------------------------------------------------------------- //
+    double dx = px-beaconX;
+    double dy = py-beaconY;
+
+    z_hat(0) = sqrt(dx*dx + dy*dy) + vR;
+    z_hat(1) = atan2(dy, dx) - pPhi + vPhi;
 
     return z_hat;
 }
@@ -119,8 +142,51 @@ void KalmanFilter::handleLidarMeasurement(LidarMeasurement meas, const BeaconMap
         BeaconData map_beacon = map.getBeaconWithId(meas.id); // Match Beacon with built in Data Association Id
         if (meas.id != -1 && map_beacon.id != -1) // Check that we have a valid beacon match
         {
-           
+            VectorXd zCur = VectorXd::Zero(2);
+            zCur(0) = meas.range;
+            zCur(1) = meas.theta;
 
+            VectorXd aState = VectorXd::Zero(6);
+            for (int i = 0; i < 4; i++) {
+              aState(i) = state(i);
+            }
+            MatrixXd aCov = MatrixXd::Zero(6, 6);
+            for (int r = 0; r < 4; r++) {
+              for (int c = 0; c < 4; c++) {
+                aCov(r, c) = cov(r, c);
+              }
+            }
+            aCov(4, 4) = LIDAR_RANGE_STD * LIDAR_RANGE_STD;
+            aCov(5, 5) = LIDAR_THETA_STD * LIDAR_THETA_STD;
+
+            auto sigmas = generateSigmaPoints(aState, aCov);
+            auto weights = generateSigmaWeights(6);
+
+
+            std::vector<VectorXd> zis;
+            for (size_t i = 0; i < sigmas.size(); i++) {
+                zis.emplace_back(lidarMeasurementModel(sigmas[i], map_beacon.x, map_beacon.y));
+            }
+
+            VectorXd zHat = VectorXd::Zero(2);
+            for (size_t i = 0; i < sigmas.size(); i++) {
+                zHat += weights[i] * zis[i];
+            }
+
+            MatrixXd S = MatrixXd::Zero(2, 2);
+            MatrixXd Pxz = MatrixXd::Zero(4, 2);
+            for (size_t i = 0; i < sigmas.size(); i++) {
+                auto zDiff = normaliseLidarMeasurement(zis[i] - zHat);
+                auto xDiff = normaliseState(sigmas[i].head(4) - state);
+                S += weights[i] * zDiff * zDiff.transpose();
+                Pxz += weights[i] * xDiff * zDiff.transpose();
+            }
+
+            MatrixXd K = Pxz * S.inverse();
+            VectorXd vHat = normaliseLidarMeasurement(zCur - zHat);
+            state = state + K * vHat;
+            cov = cov - K * S * K.transpose();
+            
         }
         // ----------------------------------------------------------------------- //
 
